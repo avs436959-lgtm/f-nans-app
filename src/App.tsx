@@ -11,15 +11,25 @@ interface Transaction {
 }
 
 export default function App() {
-  const [transactions, setTransactions] = useState<Transaction[]>([
-    { id: '1', title: 'Maaş', amount: 45000, type: 'income', category: 'Maaş', date: '2026-07-01' },
-    { id: '2', title: 'Market Harcaması', amount: 3500, type: 'expense', category: 'Gıda', date: '2026-07-02' },
-    { id: '3', title: 'Ev Kirası', amount: 12000, type: 'expense', category: 'Kira', date: '2026-07-03' },
-    { id: '4', title: 'Haziran Maaşı', amount: 45000, type: 'income', category: 'Maaş', date: '2026-06-25' },
-    { id: '5', title: 'Haziran Tatili', amount: 20000, type: 'expense', category: 'Seyahat', date: '2026-06-15' },
-    { id: '6', title: 'Mayıs Primi', amount: 15000, type: 'income', category: 'Prim', date: '2026-05-10' },
-    { id: '7', title: 'Mayıs Alışveriş', amount: 8000, type: 'expense', category: 'Giyim', date: '2026-05-12' },
-  ]);
+  // 1. HAFIZADAN VERİ OKUMA: Hata yapma şansı sıfır olan güvenli yükleme
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    try {
+      const saved = localStorage.getItem('finans_cuzdan_verileri');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.error("Hafıza okunurken hata oluştu:", e);
+    }
+    // Hafıza boşsa ilk başta duracak olan örnek veriler
+    return [
+      { id: 'sample-1', title: 'Maaş', amount: 45000, type: 'income', category: 'Gelir', date: '2026-07-01' },
+      { id: 'sample-2', title: 'Ev Kirası', amount: 12000, type: 'expense', category: 'Gider', date: '2026-07-03' }
+    ];
+  });
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'charts'>('dashboard');
   const [selectedCurrency, setSelectedCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY');
@@ -29,11 +39,15 @@ export default function App() {
   const [type, setType] = useState<'income' | 'expense'>('expense');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Canlı Kurlar State
   const [rates, setRates] = useState({ TRY: 1, USD: 46.76, EUR: 53.68 });
   const [isLoadingRates, setIsLoadingRates] = useState(true);
 
-  // Canlı Döviz Kurunu API'den Çekme
+  // 2. HAFIZAYA ANINDA YAZMA: Her işlem eklendiğinde veya silindiğinde saniyesinde kaydeder
+  useEffect(() => {
+    localStorage.setItem('finans_cuzdan_verileri', JSON.stringify(transactions));
+  }, [transactions]);
+
+  // Canlı Döviz Kurunu Çekme
   useEffect(() => {
     fetch('https://open.er-api.com/v6/latest/USD')
       .then((res) => res.json())
@@ -46,7 +60,7 @@ export default function App() {
       .catch(() => setIsLoadingRates(false));
   }, []);
 
-  // Hesaplamalar (TL bazında)
+  // Hesaplamalar
   const totalIncomeTL = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
   const totalExpenseTL = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
   const totalBalanceTL = totalIncomeTL - totalExpenseTL;
@@ -57,7 +71,6 @@ export default function App() {
     return `${symbol}${converted.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`;
   };
 
-  // Aylık Grafik Verisi
   const getMonthlyChartData = () => {
     const monthsOrder = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
     const monthlyData: { [key: string]: { Gelir: number; Gider: number } } = {};
@@ -67,13 +80,11 @@ export default function App() {
       if (isNaN(tDate.getTime())) return;
       
       const monthName = monthsOrder[tDate.getMonth()];
-
       if (!monthlyData[monthName]) {
         monthlyData[monthName] = { Gelir: 0, Gider: 0 };
       }
 
       const amountInSelectedCurrency = t.amount / rates[selectedCurrency];
-
       if (t.type === 'income') {
         monthlyData[monthName].Gelir += amountInSelectedCurrency;
       } else {
@@ -94,10 +105,11 @@ export default function App() {
     e.preventDefault();
     if (!title || !amount || !date) return;
 
+    // Seçilen para birimine göre TL değerini hesapla ve kaydet
     const amountInTL = parseFloat(amount) * rates[selectedCurrency];
 
     const newTransaction: Transaction = {
-      id: Date.now().toString(),
+      id: "id-" + Date.now() + "-" + Math.random().toString(36).substr(2, 4),
       title,
       amount: amountInTL,
       type,
@@ -105,37 +117,30 @@ export default function App() {
       date: date
     };
 
-    setTransactions([newTransaction, ...transactions]);
+    setTransactions((prev) => [newTransaction, ...prev]);
     setTitle('');
     setAmount('');
   };
 
-  // 🔥 SİLME FONKSİYONU
   const handleDelete = (id: string) => {
-    setTransactions(transactions.filter(t => t.id !== id));
+    setTransactions((prev) => prev.filter(t => t.id !== id));
   };
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100 font-sans">
       
-      {/* SOL PANEL */}
+      {/* SOL PANEL (SIDEBAR) */}
       <aside className="w-64 bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between hidden md:flex">
         <div className="flex flex-col h-full justify-between">
           <div>
             <div className="mb-10">
-              <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-400 to-teal-500 bg-clip-text text-transparent">
-                FinansÖzet
-              </h1>
+              <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-400 to-teal-500 bg-clip-text text-transparent">FinansÖzet</h1>
               <p className="text-slate-500 text-xs mt-1">Premium Varlık Yönetimi</p>
             </div>
 
             <nav className="space-y-2 mb-8">
-              <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === 'dashboard' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'text-slate-400 hover:bg-slate-800/50'}`}>
-                📊 Panel (Dashboard)
-              </button>
-              <button onClick={() => setActiveTab('charts')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === 'charts' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'text-slate-400 hover:bg-slate-800/50'}`}>
-                📈 Grafikler
-              </button>
+              <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === 'dashboard' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'text-slate-400 hover:bg-slate-800/50'}`}>📊 Panel (Dashboard)</button>
+              <button onClick={() => setActiveTab('charts')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === 'charts' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'text-slate-400 hover:bg-slate-800/50'}`}>📈 Grafikler</button>
             </nav>
 
             {/* Canlı Kurlar */}
@@ -175,7 +180,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* EKRAN 1: DASHBOARD */}
         {activeTab === 'dashboard' && (
           <div>
             {/* Özet Kartları */}
@@ -201,15 +205,15 @@ export default function App() {
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div>
                     <label className="block text-xs font-medium text-slate-400 mb-1.5">AÇIKLAMA</label>
-                    <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Örn: Bilet, Fatura" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none text-sm" />
+                    <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Örn: Market Harcaması" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none text-sm" required />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-400 mb-1.5">TUTAR ({selectedCurrency})</label>
-                    <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none text-sm" />
+                    <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none text-sm" required min="0.01" step="any" />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-400 mb-1.5">İŞLEM TARİHİ</label>
-                    <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none text-sm" />
+                    <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none text-sm" required />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-400 mb-1.5">TÜR</label>
@@ -232,14 +236,9 @@ export default function App() {
                         <p className="font-medium text-white text-sm">{t.title}</p>
                         <p className="text-[11px] text-slate-500 mt-0.5">{t.date}</p>
                       </div>
-                      {/* 🔥 SİLME BUTONU VE FİYAT GRUBU */}
                       <div className="flex items-center gap-4">
-                        <span className={`font-semibold text-sm ${t.type === 'income' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {t.type === 'income' ? '+' : '-'}{formatValue(t.amount)}
-                        </span>
-                        <button onClick={() => handleDelete(t.id)} className="text-slate-600 hover:text-rose-400 cursor-pointer transition-colors" title="İşlemi Sil">
-                          🗑️
-                        </button>
+                        <span className={`font-semibold text-sm ${t.type === 'income' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.type === 'income' ? '+' : '-'}{formatValue(t.amount)}</span>
+                        <button onClick={() => handleDelete(t.id)} className="text-slate-600 hover:text-rose-400 cursor-pointer transition-colors">🗑️</button>
                       </div>
                     </div>
                   ))}
@@ -249,12 +248,10 @@ export default function App() {
           </div>
         )}
 
-        {/* EKRAN 2: GRAFİKLER */}
         {activeTab === 'charts' && (
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl">
             <h2 className="text-2xl font-bold text-white mb-2">Aylara Göre Gelir & Gider Dağılımı ({selectedCurrency})</h2>
             <p className="text-slate-400 text-sm mb-6">Hangi ay ne kadar kazandınız ve harcadınız yan yana inceleyin.</p>
-            
             <div className="h-96 w-full bg-slate-950 p-4 rounded-xl border border-slate-850">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={getMonthlyChartData()}>
@@ -269,7 +266,6 @@ export default function App() {
             </div>
           </div>
         )}
-
       </main>
     </div>
   )
